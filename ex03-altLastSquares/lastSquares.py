@@ -1,25 +1,44 @@
 from pyspark.sql import SparkSession
 import numpy as np
 import argparse
-import math
 
-def update_user(user_id, Rb, M):
-    """Update the user matrix U given the user ID and ratings R."""
+def update_user(user_id, Rb, M, k):
+    """Actualiza el vector de características del usuario dado el ID del usuario y las calificaciones R."""
     R = Rb.value
-    # Extract ratings for the user_id
     user_ratings = R[user_id]
-    # Optimize U for this user
-    # Implement your logic for updating U (this is a simple example)
-    return np.random.rand(len(user_ratings))  # Dummy implementation
+    
+    # Calcular el nuevo vector del usuario
+    updated_U = np.zeros(k)
+    total_weight = 0
+    
+    for movie_id, rating in enumerate(user_ratings):
+        if rating > 0:  # Solo considerar calificaciones positivas
+            updated_U += rating * M[movie_id]
+            total_weight += rating
+            
+    if total_weight > 0:
+        updated_U /= total_weight  # Promediar según el peso
+    
+    return updated_U
 
-def update_movie(movie_id, Rb, U):
-    """Update the movie matrix M given the movie ID and ratings R."""
+def update_movie(movie_id, Rb, U, k):
+    """Actualiza el vector de características de la película dado el ID de la película y las calificaciones R."""
     R = Rb.value
-    # Extract ratings for the movie_id
     movie_ratings = R[:, movie_id]
-    # Optimize M for this movie
-    # Implement your logic for updating M (this is a simple example)
-    return np.random.rand(len(movie_ratings))  # Dummy implementation
+    
+    # Calcular el nuevo vector de la película
+    updated_M = np.zeros(k)
+    total_weight = 0
+    
+    for user_id, rating in enumerate(movie_ratings):
+        if rating > 0:  # Solo considerar calificaciones positivas
+            updated_M += rating * U[user_id]
+            total_weight += rating
+            
+    if total_weight > 0:
+        updated_M /= total_weight  # Promediar según el peso
+    
+    return updated_M
 
 def als(input_path, output_uri, iterations, k):
     spark = SparkSession.builder.appName("AlternatingLeastSquares").getOrCreate()
@@ -34,16 +53,16 @@ def als(input_path, output_uri, iterations, k):
 
     for _ in range(iterations):
         # Actualizar U
-        U = spark.sparkContext.parallelize(range(u)).map(lambda j: update_user(j, Rb, M)).collect()
+        U = spark.sparkContext.parallelize(range(u)).map(lambda j: update_user(j, Rb, M, k)).collect()
         
         # Actualizar M
-        M = spark.sparkContext.parallelize(range(m)).map(lambda j: update_movie(j, Rb, U)).collect()
+        M = spark.sparkContext.parallelize(range(m)).map(lambda j: update_movie(j, Rb, U, k)).collect()
 
     # Crear un DataFrame para guardar el resultado
-    transformed_df = spark.createDataFrame(U, schema=["user_vector_{}".format(i) for i in range(k)])
+    user_vectors_df = spark.createDataFrame(U, schema=["user_vector_{}".format(i) for i in range(k)])
     
     # Guardar el DataFrame en formato Parquet
-    transformed_df.write.mode("overwrite").parquet(output_uri)
+    user_vectors_df.write.mode("overwrite").parquet(output_uri)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Alternating Least Squares (ALS) using Spark')
@@ -55,4 +74,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     als(args.data_source, args.output_uri, args.iterations, args.k)
-
